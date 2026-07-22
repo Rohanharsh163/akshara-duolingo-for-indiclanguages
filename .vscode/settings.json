@@ -1,0 +1,75 @@
+{
+  // Flutter settings
+  "dart.flutterSdkPath": ".fvm/flutter_sdk",
+  "dart.sdkPath": ".fvm/flutter_sdk/bin/cache/dart-sdk",
+  "flutterSdkPath": ".fvm/flutter_sdk",
+  "dart.openDevTools": "flutter",
+  "dart.previewFlutterUiGuides": true,
+  "dart.previewFlutterUiGuidesCustomTracking": true,
+  "dart.debugExternalLibraries": false,
+  "dart.debugSdkLibraries": false,
+
+  // Formatting and linting
+  "[dart]": {
+    "editor.codeActionsOnSave": {
+      "source.fixAll": "explicit",
+      "source.organizeImports": "explicit"
+    },
+    "editor.formatOnSave": true,
+    "editor.formatOnType": true,
+    "editor.rulers": [80, 120]
+  },
+  "editor.tabSize": 2,
+  "editor.insertSpaces": true,
+  "editor.detectIndentation": false,
+
+  // Python (for backend)
+  "[python]": {
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "python.formatting.provider": "black",
+    "python.formatting.blackArgs": ["--line-length", "88"],
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": true,
+    "python.linting.flake8Enabled": false
+  },
+
+  // File associations
+  "files.associations": {
+    "*.json": "jsonc"
+  },
+
+  // Workspace settings
+  "files.exclude": {
+    "**/.git": true,
+    "**/.dart_tool": true,
+    "**/.flutter-plugins": true,
+    "**/.flutter-plugins-dependencies": true,
+    "**/.packages": true,
+    "**/android": true,
+    "**/ios": true,
+    "**/build": true,
+    "**/node_modules": true,
+    "**/coverage": true
+  },
+
+  // Debugging
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Flutter",
+        "request": "launch",
+        "type": "dart"
+      },
+      {
+        "name": "Python: FastAPI",
+        "type": "python",
+        "request": "launch",
+        "module": "uvicorn",
+        "args": ["main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"]
+      }
+    ]
+  },
+  "cmake.sourceDirectory": "/Users/rohanharshithamarthaluri/Desktop/akshara-duolingo_for_indiclanguages-main/linux"
+}

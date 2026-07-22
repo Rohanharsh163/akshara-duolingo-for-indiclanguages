@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "384360361083",
+    "project_id": "akshara-47ef8",
+    "storage_bucket": "akshara-47ef8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:384360361083:android:5e7d48db493a8566c0c6de",
+        "android_client_info": {
+          "package_name": "com.akshara.learn"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB1JbNZA0Q0n5rCPgRsbTakxlN91_ZaEqE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:384360361083:android:e56856fc66e34525c0c6de",
+        "android_client_info": {
+          "package_name": "com.example.akshara_2"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB1JbNZA0Q0n5rCPgRsbTakxlN91_ZaEqE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
