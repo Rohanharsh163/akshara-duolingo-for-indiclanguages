@@ -1,68 +1,97 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../l10n/app_localizations.dart';
+import '../services/guest_session.dart';
 import '../supabase_config.dart';
 
 class HomeScreen extends StatefulWidget {
-  final void Function(Locale locale)? setLocale; // For language switching
+  final void Function(Locale locale)? setLocale;
 
   const HomeScreen({super.key, this.setLocale});
 
   @override
-  State createState() => _HomeScreenState();
+  State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
   int _streak = 0;
   bool _loading = true;
-  late User _user;
+
+  User? _user;
+
   Locale _locale = const Locale('en');
 
   @override
   void initState() {
     super.initState();
-    _user = SupabaseConfig.auth.currentUser!;
+
+    _user = GuestSession.isGuest ? null : SupabaseConfig.auth.currentUser;
+
     _initializeUserData();
   }
 
   Future<void> _initializeUserData() async {
+    // Guest users don't need database-based streak calculations.
+    if (GuestSession.isGuest || _user == null) {
+      if (mounted) {
+        setState(() {
+          _streak = 0;
+          _loading = false;
+        });
+      }
+      return;
+    }
+
     try {
-      // User creation is handled by Supabase trigger
-      // Just calculate streak
       await _calculateStreak();
     } catch (e) {
-      setState(() => _loading = false);
+      debugPrint('User initialization error: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
     }
   }
 
   Future<void> _calculateStreak() async {
     try {
+      if (_user == null) return;
+
       final response = await SupabaseConfig.client
           .from('users')
           .select()
-          .eq('id', _user.id)
+          .eq('id', _user!.id)
           .single();
-      
-      if (response.isNotEmpty) {
-        final lastActive = DateTime.parse(response['last_active']);
-        final now = DateTime.now();
-        if (!_isSameDay(lastActive, now)) {
-          final newStreak = (response['streak'] as int) + 1;
-          await SupabaseConfig.client
-              .from('users')
-              .update({
-                'streak': newStreak,
-                'last_active': now.toIso8601String(),
-              })
-              .eq('id', _user.id);
-          setState(() => _streak = newStreak);
-        } else {
-          setState(() => _streak = response['streak'] as int);
+
+      final lastActive = DateTime.parse(response['last_active']);
+
+      final now = DateTime.now();
+
+      if (!_isSameDay(lastActive, now)) {
+        final newStreak = (response['streak'] as int) + 1;
+
+        await SupabaseConfig.client
+            .from('users')
+            .update({'streak': newStreak, 'last_active': now.toIso8601String()})
+            .eq('id', _user!.id);
+
+        if (mounted) {
+          setState(() {
+            _streak = newStreak;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _streak = response['streak'] as int;
+          });
         }
       }
-      setState(() => _loading = false);
     } catch (e) {
-      setState(() => _loading = false);
+      debugPrint('Streak calculation error: $e');
     }
   }
 
@@ -71,14 +100,32 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String get _userName {
-    if (_user.userMetadata?['full_name']?.isNotEmpty ?? false) {
-      return _user.userMetadata!['full_name'];
+    if (GuestSession.isGuest) {
+      return 'Guest';
     }
-    if (_user.email?.isNotEmpty ?? false) return _user.email!.split('@')[0];
+
+    if (_user?.userMetadata?['full_name']?.isNotEmpty ?? false) {
+      return _user!.userMetadata!['full_name'];
+    }
+
+    if (_user?.email?.isNotEmpty ?? false) {
+      return _user!.email!.split('@')[0];
+    }
+
     return AppLocalizations.of(context)!.profile;
   }
 
   Future<void> _logout() async {
+    if (GuestSession.isGuest) {
+      GuestSession.end();
+
+      if (!mounted) return;
+
+      Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+
+      return;
+    }
+
     await SupabaseConfig.auth.signOut();
   }
 
@@ -86,32 +133,30 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _locale = locale;
     });
+
     widget.setLocale?.call(locale);
   }
 
-  // Dummy function for word of the day; replace with your backend/Supabase logic
   Future<String> fetchWordOfTheDay(String language) async {
-    // Replace with actual logic
     return 'పుస్తక (Book)';
   }
 
-  // Dummy function for progress; replace with your logic
   Future<double> fetchProgress(String language) async {
-    // Replace with actual logic
     return 0.6;
   }
 
   @override
   Widget build(BuildContext context) {
-    // Wrap with Localizations.override to allow runtime locale change
     return Localizations.override(
       context: context,
       locale: _locale,
       child: Builder(
         builder: (context) {
           final loc = AppLocalizations.of(context)!;
+
           return Scaffold(
             backgroundColor: const Color(0xFFFDF6E3),
+
             appBar: AppBar(
               title: Text(
                 loc.appTitle,
@@ -125,42 +170,53 @@ class _HomeScreenState extends State<HomeScreen> {
               backgroundColor: Colors.transparent,
               elevation: 0,
               centerTitle: true,
+
               leading: Builder(
                 builder: (context) => IconButton(
                   icon: const Icon(Icons.menu, color: Colors.deepOrange),
                   onPressed: () => Scaffold.of(context).openDrawer(),
                 ),
               ),
+
               actions: [
-                // Language selection button
                 PopupMenuButton<Locale>(
                   icon: const Icon(Icons.language, color: Colors.deepOrange),
                   tooltip: loc.language,
                   onSelected: _changeLanguage,
                   itemBuilder: (context) => [
-                    PopupMenuItem(
-                      value: const Locale('en'),
+                    const PopupMenuItem(
+                      value: Locale('en'),
                       child: Text('English'),
                     ),
-                    PopupMenuItem(
-                      value: const Locale('te'),
+                    const PopupMenuItem(
+                      value: Locale('te'),
                       child: Text('తెలుగు'),
                     ),
-                    PopupMenuItem(
-                      value: const Locale('hi'),
+                    const PopupMenuItem(
+                      value: Locale('hi'),
                       child: Text('हिन्दी'),
                     ),
-                    PopupMenuItem(
-                      value: const Locale('ta'),
+                    const PopupMenuItem(
+                      value: Locale('ta'),
                       child: Text('தமிழ்'),
                     ),
                   ],
                 ),
+
                 IconButton(
                   icon: Row(
                     children: [
-                      const Icon(Icons.local_fire_department, color: Colors.orange),
-                      Text('$_streak', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.orange)),
+                      const Icon(
+                        Icons.local_fire_department,
+                        color: Colors.orange,
+                      ),
+                      Text(
+                        '$_streak',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange,
+                        ),
+                      ),
                     ],
                   ),
                   tooltip: loc.streaks,
@@ -168,8 +224,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     Navigator.pushNamed(context, '/streaks');
                   },
                 ),
+
                 IconButton(
-                  icon: const Icon(Icons.account_circle_rounded, color: Colors.deepOrange),
+                  icon: const Icon(
+                    Icons.account_circle_rounded,
+                    color: Colors.deepOrange,
+                  ),
                   tooltip: loc.profile,
                   onPressed: () {
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -177,6 +237,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     );
                   },
                 ),
+
                 IconButton(
                   icon: const Icon(Icons.logout, color: Colors.deepOrange),
                   tooltip: loc.logout,
@@ -184,6 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ],
             ),
+
             drawer: Drawer(
               child: ListView(
                 padding: EdgeInsets.zero,
@@ -195,6 +257,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       style: const TextStyle(color: Colors.white, fontSize: 24),
                     ),
                   ),
+
                   ListTile(
                     leading: const Icon(Icons.home),
                     title: Text(loc.home),
@@ -202,14 +265,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       Navigator.pop(context);
                     },
                   ),
+
                   ListTile(
                     leading: const Icon(Icons.school),
                     title: Text(loc.modules),
                     onTap: () {
                       Navigator.pop(context);
-                      Navigator.pushNamed(context, '/modules');
+                      Navigator.pushNamed(context, '/languages');
                     },
                   ),
+
                   ListTile(
                     leading: const Icon(Icons.leaderboard),
                     title: Text(loc.leaderboard),
@@ -218,6 +283,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Navigator.pushNamed(context, '/leaderboard');
                     },
                   ),
+
                   ListTile(
                     leading: const Icon(Icons.settings),
                     title: Text(loc.settings),
@@ -229,6 +295,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
+
             body: _loading
                 ? const Center(
                     child: CircularProgressIndicator(
@@ -243,6 +310,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             const SizedBox(height: 16),
+
                             Text(
                               _userName,
                               textAlign: TextAlign.center,
@@ -252,7 +320,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 color: Colors.deepOrange,
                               ),
                             ),
+
                             const SizedBox(height: 32),
+
                             // Streak card
                             Container(
                               width: double.infinity,
@@ -263,7 +333,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 borderRadius: BorderRadius.circular(24),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.orange.withValues(alpha: 0.13),
+                                    color: Colors.orange.withValues(
+                                      alpha: 0.13,
+                                    ),
                                     blurRadius: 14,
                                     offset: const Offset(0, 6),
                                   ),
@@ -272,8 +344,13 @@ class _HomeScreenState extends State<HomeScreen> {
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Text('🔥', style: TextStyle(fontSize: 38)),
+                                  const Text(
+                                    '🔥',
+                                    style: TextStyle(fontSize: 38),
+                                  ),
+
                                   const SizedBox(height: 8),
+
                                   Text(
                                     '$_streak',
                                     style: const TextStyle(
@@ -282,6 +359,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       color: Colors.deepOrange,
                                     ),
                                   ),
+
                                   Text(
                                     loc.dayStreak,
                                     style: const TextStyle(
@@ -290,15 +368,22 @@ class _HomeScreenState extends State<HomeScreen> {
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
+
                                   const SizedBox(height: 10),
+
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 14,
+                                      vertical: 6,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: Colors.orange[50],
                                       borderRadius: BorderRadius.circular(18),
                                     ),
                                     child: Text(
-                                      _streak == 0 ? loc.startJourney : loc.keepItUp,
+                                      _streak == 0
+                                          ? loc.startJourney
+                                          : loc.keepItUp,
                                       style: const TextStyle(
                                         color: Colors.deepOrange,
                                         fontWeight: FontWeight.w500,
@@ -309,20 +394,29 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ],
                               ),
                             ),
+
                             const SizedBox(height: 28),
+
                             // Progress bar
                             Align(
                               alignment: Alignment.centerLeft,
                               child: Text(
                                 loc.yourProgress,
-                                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.orange[900]),
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.orange[900],
+                                ),
                               ),
                             ),
+
                             const SizedBox(height: 12),
+
                             FutureBuilder<double>(
-                              future: fetchProgress("Hindi"), // Replace with actual language
+                              future: fetchProgress('Hindi'),
                               builder: (context, snapshot) {
-                                double progress = snapshot.data ?? 0.0;
+                                final progress = snapshot.data ?? 0.0;
+
                                 return LinearProgressIndicator(
                                   value: progress,
                                   minHeight: 12,
@@ -331,35 +425,54 @@ class _HomeScreenState extends State<HomeScreen> {
                                 );
                               },
                             ),
+
                             const SizedBox(height: 32),
+
                             // Word of the day
                             Align(
                               alignment: Alignment.centerLeft,
                               child: Text(
                                 loc.wordOfTheDay,
-                                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.orange[900]),
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.orange[900],
+                                ),
                               ),
                             ),
+
                             const SizedBox(height: 16),
+
                             FutureBuilder<String>(
-                              future: fetchWordOfTheDay("Hindi"), // Replace with actual language
+                              future: fetchWordOfTheDay('Hindi'),
                               builder: (context, snapshot) {
-                                if (snapshot.connectionState == ConnectionState.waiting) {
+                                if (snapshot.connectionState ==
+                                    ConnectionState.waiting) {
                                   return const LinearProgressIndicator();
                                 }
+
                                 if (snapshot.hasError) {
                                   return Text(loc.noQuestions);
                                 }
+
                                 return Text(
                                   snapshot.data ?? '',
-                                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w500),
+                                  style: const TextStyle(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 );
                               },
                             ),
+
                             const SizedBox(height: 28),
-                            // User info
+
+                            // User information
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
                               decoration: BoxDecoration(
                                 color: Colors.white.withValues(alpha: 0.85),
                                 borderRadius: BorderRadius.circular(14),
@@ -367,11 +480,17 @@ class _HomeScreenState extends State<HomeScreen> {
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(Icons.email, color: Colors.orange[700], size: 18),
+                                  Icon(
+                                    Icons.email,
+                                    color: Colors.orange[700],
+                                    size: 18,
+                                  ),
+
                                   const SizedBox(width: 6),
+
                                   Flexible(
                                     child: Text(
-                                      '${loc.loggedInAs}: ${_user.email ?? "Guest"}',
+                                      '${loc.loggedInAs}: ${_user?.email ?? "Guest"}',
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: Colors.grey[800],
@@ -382,13 +501,23 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ],
                               ),
                             ),
+
                             const SizedBox(height: 28),
+
                             ElevatedButton(
-                              onPressed: () => Navigator.pushReplacementNamed(context, '/languages'),
+                              onPressed: () {
+                                Navigator.pushReplacementNamed(
+                                  context,
+                                  '/languages',
+                                );
+                              },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.deepOrange,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 32,
+                                  vertical: 12,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
                                 ),
@@ -396,7 +525,10 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                               child: Text(
                                 loc.startLearning,
-                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                             ),
                           ],

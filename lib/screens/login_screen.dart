@@ -1,19 +1,23 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../../l10n/app_localizations.dart';
+import '../services/guest_session.dart';
 import '../supabase_config.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
   @override
-  State createState() => _LoginScreenState();
+  State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
   String email = '';
   String password = '';
+
   final _formKey = GlobalKey<FormState>();
+
   String error = '';
   bool _loading = false;
 
@@ -22,84 +26,82 @@ class _LoginScreenState extends State<LoginScreen> {
       _loading = true;
       error = '';
     });
-    
+
     try {
       await SupabaseConfig.auth.signInWithOAuth(
         OAuthProvider.google,
         redirectTo: 'io.supabase.flutter://login-callback/',
       );
     } on AuthException catch (e) {
-      setState(() => error = e.message);
+      if (mounted) {
+        setState(() => error = e.message);
+      }
     } catch (e) {
-      setState(() => error = 'Google Sign-In failed: $e');
+      if (mounted) {
+        setState(() => error = 'Google Sign-In failed: $e');
+      }
     } finally {
-      setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
-  Future<void> _handleGuestSignIn() async {
-    setState(() {
-      _loading = true;
-      error = '';
-    });
-    
-    try {
-      // Supabase doesn't support anonymous auth by default
-      // You can either disable this feature or implement a custom solution
-      setState(() => error = 'Guest login not supported with Supabase');
-    } catch (e) {
-      setState(() => error = 'Guest login failed: $e');
-    } finally {
-      setState(() => _loading = false);
-    }
+  // Independent guest login: no Supabase request.
+  void _handleGuestSignIn() {
+    GuestSession.start();
+
+    Navigator.pushReplacementNamed(context, '/home');
   }
 
   Future<void> _handleEmailSignIn() async {
     if (!_formKey.currentState!.validate()) return;
-    
+
     setState(() {
       _loading = true;
       error = '';
     });
-    
+
     try {
       final response = await SupabaseConfig.auth.signInWithPassword(
         email: email,
         password: password,
       );
-      
+
       if (response.user != null) {
-        // Check if user exists in our users table, if not create them
+        // Registered user initialization.
         await _ensureUserExists(response.user!);
       }
     } on AuthException catch (e) {
-      setState(() => error = e.message);
+      if (mounted) {
+        setState(() => error = e.message);
+      }
     } catch (e) {
-      setState(() => error = 'Login failed: $e');
+      if (mounted) {
+        setState(() => error = 'Login failed: $e');
+      }
     } finally {
-      setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
   Future<void> _ensureUserExists(User user) async {
     try {
-      // Just update last active - user creation is handled by Supabase trigger
       await SupabaseConfig.client
           .from('users')
-          .update({
-            'last_active': DateTime.now().toIso8601String(),
-          })
+          .update({'last_active': DateTime.now().toIso8601String()})
           .eq('id', user.id);
     } catch (e) {
-      // User doesn't exist yet, that's okay - the trigger will create them
-      // We can ignore this error as the user will be created automatically
+      debugPrint('User initialization warning: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final loc = AppLocalizations.of(context)!;
-    
+
     return Scaffold(
       backgroundColor: const Color(0xFFFDF6E3),
       body: Center(
@@ -110,12 +112,10 @@ class _LoginScreenState extends State<LoginScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(
-                  Icons.lightbulb,
-                  size: 80,
-                  color: Colors.amber,
-                ),
+                const Icon(Icons.lightbulb, size: 80, color: Colors.amber),
+
                 const SizedBox(height: 24),
+
                 Text(
                   loc.appTitle,
                   style: const TextStyle(
@@ -124,16 +124,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     color: Colors.deepOrange,
                   ),
                 ),
+
                 const SizedBox(height: 8),
-                Text(
+
+                const Text(
                   'Welcome to Akshara',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey,
-                  ),
+                  style: TextStyle(fontSize: 16, color: Colors.grey),
                   textAlign: TextAlign.center,
                 ),
+
                 const SizedBox(height: 32),
+
                 TextFormField(
                   decoration: InputDecoration(
                     labelText: loc.email,
@@ -148,13 +149,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (value == null || value.isEmpty) {
                       return 'Email is required';
                     }
+
                     if (!value.contains('@')) {
                       return 'Please enter a valid email';
                     }
+
                     return null;
                   },
                 ),
+
                 const SizedBox(height: 16),
+
                 TextFormField(
                   decoration: InputDecoration(
                     labelText: loc.password,
@@ -169,13 +174,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (value == null || value.isEmpty) {
                       return 'Password is required';
                     }
+
                     if (value.length < 6) {
                       return 'Password must be at least 6 characters';
                     }
+
                     return null;
                   },
                 ),
+
                 const SizedBox(height: 24),
+
                 if (error.isNotEmpty)
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -190,11 +199,13 @@ class _LoginScreenState extends State<LoginScreen> {
                       textAlign: TextAlign.center,
                     ),
                   ),
+
                 if (error.isNotEmpty) const SizedBox(height: 16),
+
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    icon: _loading 
+                    icon: _loading
                         ? const SizedBox(
                             width: 16,
                             height: 16,
@@ -213,7 +224,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                 ),
+
                 const SizedBox(height: 16),
+
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
@@ -231,34 +244,42 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                 ),
+
                 const SizedBox(height: 16),
+
                 Row(
                   children: [
                     Expanded(child: Divider(color: Colors.grey[300])),
                     const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(
-                        'OR',
-                        style: TextStyle(color: Colors.grey),
-                      ),
+                      child: Text('OR', style: TextStyle(color: Colors.grey)),
                     ),
                     Expanded(child: Divider(color: Colors.grey[300])),
                   ],
                 ),
+
                 const SizedBox(height: 16),
+
                 TextButton(
                   onPressed: _loading ? null : _handleGuestSignIn,
                   child: const Text('Continue as Guest'),
                 ),
+
                 const SizedBox(height: 24),
+
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text('Don\'t have an account? '),
+                    const Text("Don't have an account? "),
                     TextButton(
-                      onPressed: _loading 
-                          ? null 
-                          : () => Navigator.pushReplacementNamed(context, '/signup'),
+                      onPressed: _loading
+                          ? null
+                          : () {
+                              Navigator.pushReplacementNamed(
+                                context,
+                                '/signup',
+                              );
+                            },
                       child: Text(loc.signup),
                     ),
                   ],
@@ -271,4 +292,3 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
-

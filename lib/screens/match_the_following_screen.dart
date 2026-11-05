@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../api_config.dart';
 
 class MatchTheFollowingScreen extends StatefulWidget {
   const MatchTheFollowingScreen({super.key});
@@ -20,32 +21,95 @@ class _MatchTheFollowingScreenState extends State<MatchTheFollowingScreen> {
   int total = 0;
   int currentIndex = 0;
   List allQuestions = [];
+  String language = 'Telugu';
+  bool revealed = false;
+  bool _fetchStarted = false;
 
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_fetchStarted) return;
+    _fetchStarted = true;
+    final args = ModalRoute.of(context)?.settings.arguments as Map?;
+    language = (args?['langName'] ?? args?['language'] ?? 'Telugu').toString();
     fetchQuestions();
   }
 
   Future fetchQuestions() async {
     try {
-      final response = await http.get(Uri.parse('https://your-backend-url/match_the_following_questions/'));
+      final uri = Uri.parse(
+        '$baseUrl/match_the_following_questions/'
+        '?language=${Uri.encodeComponent(language)}&limit=5',
+      );
+      final response = await http.get(uri);
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         allQuestions = (data is List) ? List.from(data) : [data];
-        loadCurrentQuestion();
-      } else {
+        if (allQuestions.isNotEmpty) {
+          loadCurrentQuestion();
+          return;
+        }
+      }
+      allQuestions = await _pairsFromVocabulary();
+      if (allQuestions.isEmpty) {
         setState(() {
           loading = false;
-          questionText = 'Failed to load questions';
+          questionText = 'No match questions for $language';
         });
+        return;
       }
+      loadCurrentQuestion();
     } catch (e) {
       setState(() {
         loading = false;
         questionText = 'Error: $e';
       });
     }
+  }
+
+  /// Used when the dedicated match route is not deployed yet.
+  Future<List<Map<String, dynamic>>> _pairsFromVocabulary() async {
+    final pairs = <MapEntry<String, String>>[];
+    final seen = <String>{};
+    final quote = RegExp(r"'([^']+)'");
+    for (final module in ['Vocabulary', 'Vocabulary Expansion']) {
+      final uri = Uri.parse(
+        '$baseUrl/questions/'
+        '?language=${Uri.encodeComponent(language)}'
+        '&module=${Uri.encodeComponent(module)}'
+        '&limit=20',
+      );
+      final response = await http.get(uri);
+      if (response.statusCode != 200) continue;
+      final data = json.decode(response.body);
+      if (data is! List) continue;
+      for (final item in data) {
+        if (item is! Map) continue;
+        final question = item['question']?.toString() ?? '';
+        final answer = item['answer']?.toString().trim() ?? '';
+        final match = quote.firstMatch(question);
+        final english = match?.group(1)?.trim() ?? '';
+        if (english.isEmpty || answer.isEmpty || !seen.add(english.toLowerCase())) {
+          continue;
+        }
+        pairs.add(MapEntry(answer, english));
+      }
+    }
+    pairs.shuffle();
+    final sets = <Map<String, dynamic>>[];
+    for (var i = 0; i < pairs.length; i += 4) {
+      final chunk = pairs.skip(i).take(4).toList();
+      if (chunk.length < 2) continue;
+      sets.add({
+        'language': language,
+        'pairs': {
+          'native': chunk.map((entry) => entry.key).toList(),
+          'english': chunk.map((entry) => entry.value).toList(),
+        },
+      });
+      if (sets.length >= 5) break;
+    }
+    return sets;
   }
 
   void loadCurrentQuestion() {
@@ -58,8 +122,20 @@ class _MatchTheFollowingScreenState extends State<MatchTheFollowingScreen> {
     }
     final question = allQuestions[currentIndex];
     questionText = 'Match the Sentences';
-    leftItems = List.from(question['pairs']['telugu']);
-    rightItems = List.from(question['pairs']['english']);
+    final pairs = question is Map ? question['pairs'] : null;
+    final native = pairs is Map ? (pairs['native'] ?? pairs['telugu']) : null;
+    final english = pairs is Map ? pairs['english'] : null;
+    if (native is! List || english is! List || native.isEmpty || native.length != english.length) {
+      setState(() {
+        loading = false;
+        leftItems = [];
+        rightItems = [];
+        questionText = 'This question has no match pairs';
+      });
+      return;
+    }
+    leftItems = List.from(native);
+    rightItems = List.from(english);
     correctPairs = {};
     for (int i = 0; i < leftItems.length; i++) {
       correctPairs[leftItems[i]] = rightItems[i];
@@ -67,6 +143,7 @@ class _MatchTheFollowingScreenState extends State<MatchTheFollowingScreen> {
     rightItems.shuffle();
     userPairs = {};
     score = 0;
+    revealed = false;
     total = leftItems.length;
     setState(() {
       loading = false;
@@ -80,6 +157,7 @@ class _MatchTheFollowingScreenState extends State<MatchTheFollowingScreen> {
     }
     setState(() {
       score = correct;
+      revealed = true;
     });
     showDialog(
       context: context,
@@ -96,6 +174,8 @@ class _MatchTheFollowingScreenState extends State<MatchTheFollowingScreen> {
                   loading = true;
                 });
                 loadCurrentQuestion();
+              } else {
+                Navigator.of(context).maybePop();
               }
             },
             child: Text(currentIndex < allQuestions.length - 1 ? 'Next' : 'Close'),
@@ -121,7 +201,7 @@ class _MatchTheFollowingScreenState extends State<MatchTheFollowingScreen> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 16.0),
                     child: Text(
-                      'Drag Telugu phrases to match with their English translations',
+                      'Drag $language phrases to match with their English translations',
                       style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
                       textAlign: TextAlign.center,
                     ),
@@ -137,8 +217,8 @@ class _MatchTheFollowingScreenState extends State<MatchTheFollowingScreen> {
                               color: Colors.orange,
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: const Text(
-                              'తెలుగు (Telugu)',
+                            child: Text(
+                              language,
                               style: TextStyle(
                                 color: Colors.white,
                                 fontWeight: FontWeight.bold,
@@ -224,6 +304,7 @@ class _MatchTheFollowingScreenState extends State<MatchTheFollowingScreen> {
                                           textAlign: TextAlign.center,
                                         ),
                                       ),
+                                      maxSimultaneousDrags: matched ? 0 : 1,
                                       child: Container(
                                         padding: const EdgeInsets.all(16),
                                         decoration: BoxDecoration(
@@ -237,7 +318,6 @@ class _MatchTheFollowingScreenState extends State<MatchTheFollowingScreen> {
                                           textAlign: TextAlign.center,
                                         ),
                                       ),
-                                      maxSimultaneousDrags: matched ? 0 : 1,
                                     ),
                                   ),
                                 );
@@ -266,23 +346,30 @@ class _MatchTheFollowingScreenState extends State<MatchTheFollowingScreen> {
                                 ).key;
                                 return DragTarget(
                                   builder: (context, candidateData, rejectedData) {
+                                    final isCorrect = matchedKey.isNotEmpty &&
+                                        correctPairs[matchedKey] == target;
+                                    final Color fill;
+                                    final Color borderColor;
+                                    if (matchedKey.isEmpty) {
+                                      fill = Colors.blue.shade50;
+                                      borderColor = Colors.blue.shade200;
+                                    } else if (!revealed) {
+                                      fill = Colors.blue.shade100;
+                                      borderColor = Colors.blue;
+                                    } else if (isCorrect) {
+                                      fill = Colors.green.shade100;
+                                      borderColor = Colors.green;
+                                    } else {
+                                      fill = Colors.red.shade100;
+                                      borderColor = Colors.red;
+                                    }
                                     return Container(
                                       margin: const EdgeInsets.symmetric(vertical: 8),
                                       padding: const EdgeInsets.all(16),
                                       decoration: BoxDecoration(
-                                        color: matchedKey.isNotEmpty
-                                            ? (correctPairs[matchedKey] == target
-                                                ? Colors.green.shade100
-                                                : Colors.red.shade100)
-                                            : Colors.blue.shade50,
+                                        color: fill,
                                         borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                          color: matchedKey.isNotEmpty
-                                              ? (correctPairs[matchedKey] == target
-                                                  ? Colors.green
-                                                  : Colors.red)
-                                              : Colors.blue.shade200,
-                                        ),
+                                        border: Border.all(color: borderColor),
                                       ),
                                       child: Column(
                                         children: [
@@ -298,9 +385,11 @@ class _MatchTheFollowingScreenState extends State<MatchTheFollowingScreen> {
                                                 matchedKey,
                                                 style: TextStyle(
                                                   fontSize: 14,
-                                                  color: correctPairs[matchedKey] == target
-                                                      ? Colors.green.shade800
-                                                      : Colors.red.shade800,
+                                                  color: !revealed
+                                                      ? Colors.blue.shade800
+                                                      : (correctPairs[matchedKey] == target
+                                                          ? Colors.green.shade800
+                                                          : Colors.red.shade800),
                                                   fontWeight: FontWeight.bold,
                                                 ),
                                                 textAlign: TextAlign.center,
@@ -337,7 +426,9 @@ class _MatchTheFollowingScreenState extends State<MatchTheFollowingScreen> {
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
                       ),
-                      onPressed: userPairs.length == leftItems.length ? checkAnswers : null,
+                      onPressed: leftItems.isNotEmpty && userPairs.length == leftItems.length
+                          ? checkAnswers
+                          : null,
                     ),
                   ),
                 ],

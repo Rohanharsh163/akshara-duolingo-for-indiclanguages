@@ -5,9 +5,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../../l10n/app_localizations.dart';
 import 'result_screen.dart';
-
-// Define your backend base URL here
-const String baseUrl = 'https://akshara-xh35.onrender.com';
+import '../api_config.dart';
 
 // Language code mapping for TTS/STT
 const Map<String, Map<String, String>> languageCodes = {
@@ -58,6 +56,8 @@ class _QuestionScreenState extends State<QuestionScreen> {
   late String submodule;
   late String ttsLang;
   late String sttLang;
+  String? _loadedArgsKey;
+  bool _answerLocked = false;
 
   // Level and module structure for navigation
   final Map<int, List<String>> levels = {
@@ -103,12 +103,25 @@ class _QuestionScreenState extends State<QuestionScreen> {
     final args =
         ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>? ??
             {};
-    langCode = args['langCode'] ?? 'te';
-    level = args['level'] ?? 1;
-    module = args['module'] ?? 'Script';
-    submodule = args['submodule'] ?? 'Vowels';
+    final nextLang = args['langCode'] ?? 'te';
+    final nextLevel = args['level'] ?? 1;
+    final nextModule = args['module'] ?? 'Script';
+    final nextSubmodule = args['submodule'] ?? 'Vowels';
+    final key = '$nextLang|$nextLevel|$nextModule|$nextSubmodule';
+    if (_loadedArgsKey == key) return;
+    _loadedArgsKey = key;
+    langCode = nextLang;
+    level = nextLevel;
+    module = nextModule;
+    submodule = nextSubmodule;
     ttsLang = languageCodes[langCode]?['tts'] ?? 'en-IN';
     sttLang = languageCodes[langCode]?['stt'] ?? 'en_IN';
+    currentQuestion = 0;
+    score = 0;
+    selectedOption = null;
+    showResult = false;
+    _lastWords = '';
+    _answerLocked = false;
     _questionsFuture = fetchQuestions(langCode, level, module, submodule);
   }
 
@@ -195,23 +208,42 @@ class _QuestionScreenState extends State<QuestionScreen> {
     }
   }
 
+  void _selectAnswer(String option, String answer, {String? spoken}) {
+    if (_answerLocked || selectedOption != null) return;
+    _answerLocked = true;
+    setState(() {
+      if (spoken != null) _lastWords = spoken;
+      selectedOption = option;
+      showResult = true;
+      if (option == answer) score++;
+    });
+    _stopListening();
+  }
+
+  bool _speechMatches(String option, String spokenText) {
+    final normalized = option.trim().toLowerCase();
+    if (normalized.isEmpty || spokenText.isEmpty) return false;
+    if (normalized == spokenText) return true;
+    if (spokenText.length < 2) return false;
+    return normalized.contains(spokenText) || spokenText.contains(normalized);
+  }
+
   void _startListening(List<String> options, String answer) async {
+    if (_answerLocked || selectedOption != null) return;
     await speech.listen(
       onResult: (result) {
-        setState(() {
-          _lastWords = result.recognizedWords;
-          final spokenText = _lastWords.trim().toLowerCase();
-          for (var option in options) {
-            if (option.toLowerCase().contains(spokenText) ||
-                spokenText.contains(option.toLowerCase())) {
-              selectedOption = option;
-              showResult = true;
-              if (option == answer) score++;
-              _stopListening();
-              break;
-            }
+        if (!mounted || _answerLocked || selectedOption != null) return;
+        final spokenText = result.recognizedWords.trim().toLowerCase();
+        if (spokenText.isEmpty) {
+          setState(() => _lastWords = result.recognizedWords);
+          return;
+        }
+        for (var option in options) {
+          if (_speechMatches(option, spokenText)) {
+            _selectAnswer(option, answer, spoken: result.recognizedWords);
+            break;
           }
-        });
+        }
       },
       localeId: sttLang,
     );
@@ -298,6 +330,7 @@ class _QuestionScreenState extends State<QuestionScreen> {
         selectedOption = null;
         showResult = false;
         _lastWords = '';
+        _answerLocked = false;
       } else {
         Navigator.pushReplacement(
           context,
@@ -417,13 +450,7 @@ class _QuestionScreenState extends State<QuestionScreen> {
                         minimumSize: const Size(double.infinity, 48),
                       ),
                       onPressed: selectedOption == null
-                          ? () {
-                              setState(() {
-                                selectedOption = option;
-                                showResult = true;
-                                if (option == question['answer']) score++;
-                              });
-                            }
+                          ? () => _selectAnswer(option, question['answer'])
                           : null,
                       child: Text(option, style: const TextStyle(fontSize: 18)),
                     ),

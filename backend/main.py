@@ -6,6 +6,7 @@ from typing import Optional
 import random
 import json
 import os
+import re
 import glob
 
 app = FastAPI()
@@ -13,8 +14,8 @@ app = FastAPI()
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # For development only!
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -54,6 +55,51 @@ def get_questions(
     ]
     random.shuffle(filtered)
     return filtered[:limit]
+
+_QUOTED = re.compile(r"'([^']+)'")
+_MATCH_MODULES = {"Vocabulary", "Vocabulary Expansion"}
+
+@app.get("/match_the_following_questions/")
+def get_match_questions(
+    language: str = Query("Telugu", description="Language to build pairs from"),
+    limit: int = Query(5, description="Number of match sets to return"),
+    pair_count: int = Query(4, ge=2, le=6, description="Pairs in each set"),
+):
+    """Build match sets from vocabulary questions (quoted English word -> answer)."""
+    pairs = []
+    seen = set()
+    for question in QUESTIONS:
+        if question.get("language", "").lower() != language.lower():
+            continue
+        if question.get("module") not in _MATCH_MODULES:
+            continue
+        match = _QUOTED.search(question.get("question", ""))
+        native = str(question.get("answer", "")).strip()
+        if not match or not native:
+            continue
+        english = match.group(1).strip()
+        key = english.lower()
+        if not english or key in seen:
+            continue
+        seen.add(key)
+        pairs.append((native, english))
+
+    random.shuffle(pairs)
+    sets = []
+    for start in range(0, len(pairs), pair_count):
+        chunk = pairs[start:start + pair_count]
+        if len(chunk) < 2:
+            continue
+        sets.append({
+            "language": language,
+            "pairs": {
+                "native": [native for native, _ in chunk],
+                "english": [english for _, english in chunk],
+            },
+        })
+        if len(sets) >= limit:
+            break
+    return sets
 
 @app.get("/audio/{filename}")
 def get_audio(filename: str):
